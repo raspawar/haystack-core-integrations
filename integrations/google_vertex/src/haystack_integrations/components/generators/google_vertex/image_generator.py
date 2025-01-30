@@ -5,7 +5,7 @@ import vertexai
 from haystack.core.component import component
 from haystack.core.serialization import default_from_dict, default_to_dict
 from haystack.dataclasses.byte_stream import ByteStream
-from vertexai.preview.vision_models import ImageGenerationModel
+from vertexai.vision_models import ImageGenerationModel
 
 logger = logging.getLogger(__name__)
 
@@ -24,20 +24,27 @@ class VertexAIImageGenerator:
 
     from haystack_integrations.components.generators.google_vertex import VertexAIImageGenerator
 
-    generator = VertexAIImageGenerator(project_id=project_id)
+    generator = VertexAIImageGenerator()
     result = generator.run(prompt="Generate an image of a cute cat")
     result["images"][0].to_file(Path("my_image.png"))
     ```
     """
 
-    def __init__(self, *, model: str = "imagegeneration", project_id: str, location: Optional[str] = None, **kwargs):
+    def __init__(
+        self,
+        *,
+        model: str = "imagegeneration",
+        project_id: Optional[str] = None,
+        location: Optional[str] = None,
+        **kwargs,
+    ):
         """
         Generates images using a Google Vertex AI model.
 
         Authenticates using Google Cloud Application Default Credentials (ADCs).
         For more information see the official [Google documentation](https://cloud.google.com/docs/authentication/provide-credentials-adc).
 
-        :param project_id: ID of the GCP project to use.
+        :param project_id: ID of the GCP project to use. By default, it is set during Google Cloud authentication.
         :param model: Name of the model to use.
         :param location: The default location to use when making API calls, if not set uses us-central-1.
         :param kwargs: Additional keyword arguments to pass to the model.

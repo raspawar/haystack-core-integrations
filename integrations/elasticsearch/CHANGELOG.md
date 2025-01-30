@@ -1,6 +1,14 @@
 # Changelog
 
-## [unreleased]
+## [integrations/elasticsearch-v1.0.1] - 2024-10-28
+
+### ⚙️ Miscellaneous Tasks
+
+- Update changelog after removing legacy filters (#1083)
+- Update ruff linting scripts and settings (#1105)
+- Adopt uv as installer (#1142)
+
+## [integrations/elasticsearch-v1.0.0] - 2024-09-12
 
 ### 🚀 Features
 
@@ -11,10 +19,15 @@
 
 - `ElasticSearch` - Fallback to default filter policy when deserializing retrievers without the init parameter (#898)
 
+### 🧪 Testing
+
+- Do not retry tests in `hatch run test` command (#954)
+
 ### ⚙️ Miscellaneous Tasks
 
 - Retry tests to reduce flakyness (#836)
 - Update ruff invocation to include check parameter (#853)
+- ElasticSearch - remove legacy filters elasticsearch (#1078)
 
 ## [integrations/elasticsearch-v0.5.0] - 2024-05-24
 
@@ -64,8 +77,6 @@ This PR will also push the docs to Readme
 
 - Fix project urls (#96)
 
-
-
 ### 🚜 Refactor
 
 - Use `hatch_vcs` to manage integrations versioning (#103)
@@ -76,14 +87,11 @@ This PR will also push the docs to Readme
 
 - Fix import and increase version (#77)
 
-
-
 ## [integrations/elasticsearch-v0.1.0] - 2023-12-04
 
 ### 🐛 Bug Fixes
 
 - Fix license headers
-
 
 ## [integrations/elasticsearch-v0.0.2] - 2023-11-29
 

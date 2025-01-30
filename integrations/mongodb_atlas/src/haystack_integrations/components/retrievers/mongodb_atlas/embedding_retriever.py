@@ -7,6 +7,7 @@ from haystack import component, default_from_dict, default_to_dict
 from haystack.dataclasses import Document
 from haystack.document_stores.types import FilterPolicy
 from haystack.document_stores.types.filter_policy import apply_filter_policy
+
 from haystack_integrations.document_stores.mongodb_atlas import MongoDBAtlasDocumentStore
 
 
@@ -27,7 +28,8 @@ class MongoDBAtlasEmbeddingRetriever:
 
     store = MongoDBAtlasDocumentStore(database_name="haystack_integration_test",
                                       collection_name="test_embeddings_collection",
-                                      vector_search_index="cosine_index")
+                                      vector_search_index="cosine_index",
+                                      full_text_search_index="full_text_index")
     retriever = MongoDBAtlasEmbeddingRetriever(document_store=store)
 
     results = retriever.run(query_embedding=np.random.random(768).tolist())

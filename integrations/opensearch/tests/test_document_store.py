@@ -9,12 +9,13 @@ import pytest
 from haystack.dataclasses.document import Document
 from haystack.document_stores.errors import DocumentStoreError, DuplicateDocumentError
 from haystack.document_stores.types import DuplicatePolicy
-from haystack.testing.document_store import DocumentStoreBaseTests
+from haystack.testing.document_store import DocumentStoreBaseTests, FilterDocumentsTestWithDataframe
 from haystack.utils.auth import Secret
+from opensearchpy.exceptions import RequestError
+
 from haystack_integrations.document_stores.opensearch import OpenSearchDocumentStore
 from haystack_integrations.document_stores.opensearch.auth import AWSAuth
 from haystack_integrations.document_stores.opensearch.document_store import DEFAULT_MAX_CHUNK_BYTES
-from opensearchpy.exceptions import RequestError
 
 
 @patch("haystack_integrations.document_stores.opensearch.document_store.OpenSearch")
@@ -262,9 +263,69 @@ class TestAuth:
             },
         }
 
+    @patch("haystack_integrations.document_stores.opensearch.document_store.OpenSearch")
+    def test_init_with_env_var_secrets(self, _mock_opensearch_client, monkeypatch):
+        """Test the default initialization using environment variables"""
+        monkeypatch.setenv("OPENSEARCH_USERNAME", "user")
+        monkeypatch.setenv("OPENSEARCH_PASSWORD", "pass")
+
+        document_store = OpenSearchDocumentStore(hosts="testhost")
+        assert document_store.client
+        _mock_opensearch_client.assert_called_once()
+        assert _mock_opensearch_client.call_args[1]["http_auth"] == ["user", "pass"]
+
+    @patch("haystack_integrations.document_stores.opensearch.document_store.OpenSearch")
+    def test_init_with_missing_env_vars(self, _mock_opensearch_client):
+        """Test that auth is None when environment variables are missing"""
+        document_store = OpenSearchDocumentStore(hosts="testhost")
+        assert document_store.client
+        _mock_opensearch_client.assert_called_once()
+        assert _mock_opensearch_client.call_args[1]["http_auth"] is None
+
+    @patch("haystack_integrations.document_stores.opensearch.document_store.OpenSearch")
+    def test_to_dict_with_env_var_secrets(self, _mock_opensearch_client, monkeypatch):
+        """Test serialization with environment variables"""
+        monkeypatch.setenv("OPENSEARCH_USERNAME", "user")
+        monkeypatch.setenv("OPENSEARCH_PASSWORD", "pass")
+
+        document_store = OpenSearchDocumentStore(hosts="testhost")
+        serialized = document_store.to_dict()
+
+        assert "http_auth" in serialized["init_parameters"]
+        auth = serialized["init_parameters"]["http_auth"]
+        assert isinstance(auth, list)
+        assert len(auth) == 2
+        # Check that we have two Secret dictionaries with correct env vars
+        assert auth[0]["type"] == "env_var"
+        assert auth[0]["env_vars"] == ["OPENSEARCH_USERNAME"]
+        assert auth[1]["type"] == "env_var"
+        assert auth[1]["env_vars"] == ["OPENSEARCH_PASSWORD"]
+
+    @patch("haystack_integrations.document_stores.opensearch.document_store.OpenSearch")
+    def test_from_dict_with_env_var_secrets(self, _mock_opensearch_client, monkeypatch):
+        """Test deserialization with environment variables"""
+        # Set environment variables so the secrets resolve properly
+        monkeypatch.setenv("OPENSEARCH_USERNAME", "user")
+        monkeypatch.setenv("OPENSEARCH_PASSWORD", "pass")
+
+        data = {
+            "type": "haystack_integrations.document_stores.opensearch.document_store.OpenSearchDocumentStore",
+            "init_parameters": {
+                "hosts": "testhost",
+                "http_auth": [
+                    {"type": "env_var", "env_vars": ["OPENSEARCH_USERNAME"], "strict": False},
+                    {"type": "env_var", "env_vars": ["OPENSEARCH_PASSWORD"], "strict": False},
+                ],
+            },
+        }
+        document_store = OpenSearchDocumentStore.from_dict(data)
+        assert document_store.client
+        _mock_opensearch_client.assert_called_once()
+        assert _mock_opensearch_client.call_args[1]["http_auth"] == ["user", "pass"]
+
 
 @pytest.mark.integration
-class TestDocumentStore(DocumentStoreBaseTests):
+class TestDocumentStore(DocumentStoreBaseTests, FilterDocumentsTestWithDataframe):
     """
     Common test cases will be provided by `DocumentStoreBaseTests` but
     you can add more to this class.
@@ -332,6 +393,27 @@ class TestDocumentStore(DocumentStoreBaseTests):
             verify_certs=False,
             embedding_dim=4,
             method={"space_type": "cosinesimil", "engine": "nmslib", "name": "hnsw"},
+        )
+        yield store
+        store.client.indices.delete(index=index, params={"ignore": [400, 404]})
+
+    @pytest.fixture
+    def document_store_embedding_dim_4_faiss(self, request):
+        """
+        This is the most basic requirement for the child class: provide
+        an instance of this document store so the base class can use it.
+        """
+        hosts = ["https://localhost:9200"]
+        # Use a different index for each test so we can run them in parallel
+        index = f"{request.node.name}"
+
+        store = OpenSearchDocumentStore(
+            hosts=hosts,
+            index=index,
+            http_auth=("admin", "admin"),
+            verify_certs=False,
+            embedding_dim=4,
+            method={"space_type": "innerproduct", "engine": "faiss", "name": "hnsw"},
         )
         yield store
         store.client.indices.delete(index=index, params={"ignore": [400, 404]})
@@ -573,76 +655,6 @@ class TestDocumentStore(DocumentStoreBaseTests):
         retrieved_ids = sorted([doc.id for doc in res])
         assert retrieved_ids == ["1", "2", "3", "4", "5"]
 
-    def test_bm25_retrieval_with_legacy_filters(self, document_store: OpenSearchDocumentStore):
-        document_store.write_documents(
-            [
-                Document(
-                    content="Haskell is a functional programming language",
-                    meta={"likes": 100000, "language_type": "functional"},
-                    id="1",
-                ),
-                Document(
-                    content="Lisp is a functional programming language",
-                    meta={"likes": 10000, "language_type": "functional"},
-                    id="2",
-                ),
-                Document(
-                    content="Exilir is a functional programming language",
-                    meta={"likes": 1000, "language_type": "functional"},
-                    id="3",
-                ),
-                Document(
-                    content="F# is a functional programming language",
-                    meta={"likes": 100, "language_type": "functional"},
-                    id="4",
-                ),
-                Document(
-                    content="C# is a functional programming language",
-                    meta={"likes": 10, "language_type": "functional"},
-                    id="5",
-                ),
-                Document(
-                    content="C++ is an object oriented programming language",
-                    meta={"likes": 100000, "language_type": "object_oriented"},
-                    id="6",
-                ),
-                Document(
-                    content="Dart is an object oriented programming language",
-                    meta={"likes": 10000, "language_type": "object_oriented"},
-                    id="7",
-                ),
-                Document(
-                    content="Go is an object oriented programming language",
-                    meta={"likes": 1000, "language_type": "object_oriented"},
-                    id="8",
-                ),
-                Document(
-                    content="Python is a object oriented programming language",
-                    meta={"likes": 100, "language_type": "object_oriented"},
-                    id="9",
-                ),
-                Document(
-                    content="Ruby is a object oriented programming language",
-                    meta={"likes": 10, "language_type": "object_oriented"},
-                    id="10",
-                ),
-                Document(
-                    content="PHP is a object oriented programming language",
-                    meta={"likes": 1, "language_type": "object_oriented"},
-                    id="11",
-                ),
-            ]
-        )
-
-        res = document_store._bm25_retrieval(
-            "programming",
-            top_k=10,
-            filters={"language_type": "functional"},
-        )
-        assert len(res) == 5
-        retrieved_ids = sorted([doc.id for doc in res])
-        assert retrieved_ids == ["1", "2", "3", "4", "5"]
-
     def test_bm25_retrieval_with_custom_query(self, document_store: OpenSearchDocumentStore):
         document_store.write_documents(
             [
@@ -759,7 +771,9 @@ class TestDocumentStore(DocumentStoreBaseTests):
         assert len(results) == 1
         assert results[0].content == "Not very similar document with meta field"
 
-    def test_embedding_retrieval_with_legacy_filters(self, document_store_embedding_dim_4: OpenSearchDocumentStore):
+    def test_embedding_retrieval_with_filters_efficient_filtering(
+        self, document_store_embedding_dim_4_faiss: OpenSearchDocumentStore
+    ):
         docs = [
             Document(content="Most similar document", embedding=[1.0, 1.0, 1.0, 1.0]),
             Document(content="2nd best document", embedding=[0.8, 0.8, 0.8, 1.0]),
@@ -769,13 +783,13 @@ class TestDocumentStore(DocumentStoreBaseTests):
                 meta={"meta_field": "custom_value"},
             ),
         ]
-        document_store_embedding_dim_4.write_documents(docs)
+        document_store_embedding_dim_4_faiss.write_documents(docs)
 
-        filters = {"meta_field": "custom_value"}
-        # we set top_k=3, to make the test pass as we are not sure whether efficient filtering is supported for nmslib
-        # TODO: remove top_k=3, when efficient filtering is supported for nmslib
-        results = document_store_embedding_dim_4._embedding_retrieval(
-            query_embedding=[0.1, 0.1, 0.1, 0.1], top_k=3, filters=filters
+        filters = {"field": "meta_field", "operator": "==", "value": "custom_value"}
+        results = document_store_embedding_dim_4_faiss._embedding_retrieval(
+            query_embedding=[0.1, 0.1, 0.1, 0.1],
+            filters=filters,
+            efficient_filtering=True,
         )
         assert len(results) == 1
         assert results[0].content == "Not very similar document with meta field"

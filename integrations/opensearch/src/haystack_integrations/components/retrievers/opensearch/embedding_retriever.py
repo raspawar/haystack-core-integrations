@@ -8,6 +8,7 @@ from haystack import component, default_from_dict, default_to_dict
 from haystack.dataclasses import Document
 from haystack.document_stores.types import FilterPolicy
 from haystack.document_stores.types.filter_policy import apply_filter_policy
+
 from haystack_integrations.document_stores.opensearch import OpenSearchDocumentStore
 
 logger = logging.getLogger(__name__)
@@ -30,6 +31,7 @@ class OpenSearchEmbeddingRetriever:
         filter_policy: Union[str, FilterPolicy] = FilterPolicy.REPLACE,
         custom_query: Optional[Dict[str, Any]] = None,
         raise_on_failure: bool = True,
+        efficient_filtering: bool = False,
     ):
         """
         Create the OpenSearchEmbeddingRetriever component.
@@ -70,12 +72,22 @@ class OpenSearchEmbeddingRetriever:
         For this `custom_query`, an example `run()` could be:
 
         ```python
-        retriever.run(query_embedding=embedding,
-                        filters={"years": ["2019"], "quarters": ["Q1", "Q2"]})
+        retriever.run(
+            query_embedding=embedding,
+            filters={
+                "operator": "AND",
+                "conditions": [
+                    {"field": "meta.years", "operator": "==", "value": "2019"},
+                    {"field": "meta.quarters", "operator": "in", "value": ["Q1", "Q2"]},
+                ],
+            },
+        )
         ```
         :param raise_on_failure:
             If `True`, raises an exception if the API call fails.
             If `False`, logs a warning and returns an empty list.
+        :param efficient_filtering: If `True`, the filter will be applied during the approximate kNN search.
+            This is only supported for knn engines "faiss" and "lucene" and does not work with the default "nmslib".
 
         :raises ValueError: If `document_store` is not an instance of OpenSearchDocumentStore.
         """
@@ -91,6 +103,7 @@ class OpenSearchEmbeddingRetriever:
         )
         self._custom_query = custom_query
         self._raise_on_failure = raise_on_failure
+        self._efficient_filtering = efficient_filtering
 
     def to_dict(self) -> Dict[str, Any]:
         """
@@ -107,6 +120,7 @@ class OpenSearchEmbeddingRetriever:
             filter_policy=self._filter_policy.value,
             custom_query=self._custom_query,
             raise_on_failure=self._raise_on_failure,
+            efficient_filtering=self._efficient_filtering,
         )
 
     @classmethod
@@ -137,6 +151,7 @@ class OpenSearchEmbeddingRetriever:
         filters: Optional[Dict[str, Any]] = None,
         top_k: Optional[int] = None,
         custom_query: Optional[Dict[str, Any]] = None,
+        efficient_filtering: Optional[bool] = None,
     ):
         """
         Retrieve documents using a vector similarity metric.
@@ -175,9 +190,20 @@ class OpenSearchEmbeddingRetriever:
         For this `custom_query`, an example `run()` could be:
 
         ```python
-        retriever.run(query_embedding=embedding,
-                        filters={"years": ["2019"], "quarters": ["Q1", "Q2"]})
+        retriever.run(
+            query_embedding=embedding,
+            filters={
+                "operator": "AND",
+                "conditions": [
+                    {"field": "meta.years", "operator": "==", "value": "2019"},
+                    {"field": "meta.quarters", "operator": "in", "value": ["Q1", "Q2"]},
+                ],
+            },
+        )
         ```
+
+        :param efficient_filtering: If `True`, the filter will be applied during the approximate kNN search.
+            This is only supported for knn engines "faiss" and "lucene" and does not work with the default "nmslib".
 
         :returns:
             Dictionary with key "documents" containing the retrieved Documents.
@@ -191,6 +217,8 @@ class OpenSearchEmbeddingRetriever:
             top_k = self._top_k
         if custom_query is None:
             custom_query = self._custom_query
+        if efficient_filtering is None:
+            efficient_filtering = self._efficient_filtering
 
         docs: List[Document] = []
 
@@ -200,6 +228,7 @@ class OpenSearchEmbeddingRetriever:
                 filters=filters,
                 top_k=top_k,
                 custom_query=custom_query,
+                efficient_filtering=efficient_filtering,
             )
         except Exception as e:
             if self._raise_on_failure:

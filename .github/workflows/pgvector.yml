@@ -33,7 +33,7 @@ jobs:
         python-version: ["3.9", "3.10", "3.11"]
     services:
       pgvector:
-        image: ankane/pgvector:latest
+        image: pgvector/pgvector:pg17
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -61,13 +61,13 @@ jobs:
         run: hatch run docs
 
       - name: Run tests
-        run: hatch run cov
+        run: hatch run cov-retry
 
       - name: Nightly - run unit tests with Haystack main branch
         if: github.event_name == 'schedule'
         run: |
-          hatch run pip install git+https://github.com/deepset-ai/haystack.git
-          hatch run test -m "not integration"
+          hatch run uv pip install git+https://github.com/deepset-ai/haystack.git@main
+          hatch run cov-retry -m "not integration"
 
       - name: Send event to Datadog for nightly failures
         if: failure() && github.event_name == 'schedule'

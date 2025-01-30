@@ -12,7 +12,6 @@ from haystack.core.serialization import default_from_dict, default_to_dict
 from haystack.dataclasses.document import Document
 from haystack.document_stores.errors import DocumentStoreError, DuplicateDocumentError
 from haystack.document_stores.types.policy import DuplicatePolicy
-from haystack.utils.filters import convert
 
 import weaviate
 from weaviate.collections.classes.data import DataObject
@@ -68,7 +67,7 @@ class WeaviateDocumentStore:
     from haystack_integrations.document_stores.weaviate.auth import AuthApiKey
     from haystack_integrations.document_stores.weaviate.document_store import WeaviateDocumentStore
 
-    os.environ["WEAVIATE_API_KEY"] = "MY_API_KEY
+    os.environ["WEAVIATE_API_KEY"] = "MY_API_KEY"
 
     document_store = WeaviateDocumentStore(
         url="rAnD0mD1g1t5.something.weaviate.cloud",
@@ -172,17 +171,18 @@ class WeaviateDocumentStore:
         if self._client:
             return self._client
 
-        if self._url and self._url.startswith("http") and self._url.endswith(".weaviate.network"):
-            # We use this utility function instead of using WeaviateClient directly like in other cases
-            # otherwise we'd have to parse the URL to get some information about the connection.
-            # This utility function does all that for us.
-            self._client = weaviate.connect_to_wcs(
+        if self._url and self._url.endswith((".weaviate.network", ".weaviate.cloud")):
+            # If we detect that the URL is a Weaviate Cloud URL, we use the utility function to connect
+            # instead of using WeaviateClient directly like in other cases.
+            # Among other things, the utility function takes care of parsing the URL.
+            self._client = weaviate.connect_to_weaviate_cloud(
                 self._url,
                 auth_credentials=self._auth_client_secret.resolve_value() if self._auth_client_secret else None,
                 headers=self._additional_headers,
                 additional_config=self._additional_config,
             )
         else:
+            # Embedded, local Docker deployment or custom connection.
             # proxies, timeout_config, trust_env are part of additional_config now
             # startup_period has been removed
             self._client = weaviate.WeaviateClient(
@@ -286,6 +286,14 @@ class WeaviateDocumentStore:
         # The embedding vector is stored separately from the rest of the data
         del data["embedding"]
 
+        # _split_overlap meta field is unsupported because of a bug
+        # https://github.com/deepset-ai/haystack-core-integrations/issues/1172
+        if "_split_overlap" in data:
+            data.pop("_split_overlap")
+            logger.warning(
+                "Document %s has the unsupported `_split_overlap` meta field. It will be ignored.", data["_original_id"]
+            )
+
         if "sparse_embedding" in data:
             sparse_embedding = data.pop("sparse_embedding", None)
             if sparse_embedding:
@@ -387,7 +395,8 @@ class WeaviateDocumentStore:
         :returns: A list of Documents that match the given filters.
         """
         if filters and "operator" not in filters and "conditions" not in filters:
-            filters = convert(filters)
+            msg = "Invalid filter syntax. See https://docs.haystack.deepset.ai/docs/metadata-filtering for details."
+            raise ValueError(msg)
 
         result = []
         if filters:

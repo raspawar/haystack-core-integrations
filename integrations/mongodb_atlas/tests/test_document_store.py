@@ -9,12 +9,13 @@ import pytest
 from haystack.dataclasses.document import ByteStream, Document
 from haystack.document_stores.errors import DuplicateDocumentError
 from haystack.document_stores.types import DuplicatePolicy
-from haystack.testing.document_store import DocumentStoreBaseTests
+from haystack.testing.document_store import DocumentStoreBaseTests, FilterDocumentsTestWithDataframe
 from haystack.utils import Secret
-from haystack_integrations.document_stores.mongodb_atlas import MongoDBAtlasDocumentStore
 from pandas import DataFrame
 from pymongo import MongoClient
 from pymongo.driver_info import DriverInfo
+
+from haystack_integrations.document_stores.mongodb_atlas import MongoDBAtlasDocumentStore
 
 
 @patch("haystack_integrations.document_stores.mongodb_atlas.document_store.MongoClient")
@@ -24,6 +25,7 @@ def test_init_is_lazy(_mock_client):
         database_name="database_name",
         collection_name="collection_name",
         vector_search_index="cosine_index",
+        full_text_search_index="full_text_index",
     )
     _mock_client.assert_not_called()
 
@@ -33,7 +35,7 @@ def test_init_is_lazy(_mock_client):
     reason="No MongoDB Atlas connection string provided",
 )
 @pytest.mark.integration
-class TestDocumentStore(DocumentStoreBaseTests):
+class TestDocumentStore(DocumentStoreBaseTests, FilterDocumentsTestWithDataframe):
     @pytest.fixture
     def document_store(self):
         database_name = "haystack_integration_test"
@@ -52,6 +54,7 @@ class TestDocumentStore(DocumentStoreBaseTests):
             database_name=database_name,
             collection_name=collection_name,
             vector_search_index="cosine_index",
+            full_text_search_index="full_text_index",
         )
         yield store
         database[collection_name].drop()
@@ -91,6 +94,7 @@ class TestDocumentStore(DocumentStoreBaseTests):
                 },
                 "database_name": "haystack_integration_test",
                 "vector_search_index": "cosine_index",
+                "full_text_search_index": "full_text_index",
             },
         }
 
@@ -109,6 +113,7 @@ class TestDocumentStore(DocumentStoreBaseTests):
                     "database_name": "haystack_integration_test",
                     "collection_name": "test_embeddings_collection",
                     "vector_search_index": "cosine_index",
+                    "full_text_search_index": "full_text_index",
                 },
             }
         )
@@ -116,6 +121,7 @@ class TestDocumentStore(DocumentStoreBaseTests):
         assert docstore.database_name == "haystack_integration_test"
         assert docstore.collection_name == "test_embeddings_collection"
         assert docstore.vector_search_index == "cosine_index"
+        assert docstore.full_text_search_index == "full_text_index"
 
     def test_complex_filter(self, document_store, filterable_docs):
         document_store.write_documents(filterable_docs)

@@ -2,13 +2,12 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-from typing import Any
-
 import pytest
 from haystack.components.generators.utils import print_streaming_chunk
 from haystack.dataclasses import StreamingChunk
+from ollama._types import ResponseError
+
 from haystack_integrations.components.generators.ollama import OllamaGenerator
-from requests import HTTPError
 
 
 class TestOllamaGenerator:
@@ -20,7 +19,7 @@ class TestOllamaGenerator:
             ("What is the capital of Ghana?", "Accra"),
         ]
 
-        component = OllamaGenerator()
+        component = OllamaGenerator(model="llama3.2:3b")
 
         for prompt, answer in prompts_and_answers:
             results = component.run(prompt=prompt)
@@ -34,18 +33,19 @@ class TestOllamaGenerator:
     def test_run_model_unavailable(self):
         component = OllamaGenerator(model="Alistair_is_great")
 
-        with pytest.raises(HTTPError):
+        with pytest.raises(ResponseError):
             component.run(prompt="Why is Alistair so great?")
 
     def test_init_default(self):
         component = OllamaGenerator()
         assert component.model == "orca-mini"
-        assert component.url == "http://localhost:11434/api/generate"
+        assert component.url == "http://localhost:11434"
         assert component.generation_kwargs == {}
         assert component.system_prompt is None
         assert component.template is None
         assert component.raw is False
         assert component.timeout == 120
+        assert component.keep_alive is None
         assert component.streaming_callback is None
 
     def test_init(self):
@@ -54,19 +54,21 @@ class TestOllamaGenerator:
 
         component = OllamaGenerator(
             model="llama2",
-            url="http://my-custom-endpoint:11434/api/generate",
+            url="http://my-custom-endpoint:11434",
             generation_kwargs={"temperature": 0.5},
             system_prompt="You are Luigi from Super Mario Bros.",
             timeout=5,
+            keep_alive="10m",
             streaming_callback=callback,
         )
         assert component.model == "llama2"
-        assert component.url == "http://my-custom-endpoint:11434/api/generate"
+        assert component.url == "http://my-custom-endpoint:11434"
         assert component.generation_kwargs == {"temperature": 0.5}
         assert component.system_prompt == "You are Luigi from Super Mario Bros."
         assert component.template is None
         assert component.raw is False
         assert component.timeout == 5
+        assert component.keep_alive == "10m"
         assert component.streaming_callback == callback
 
         component = OllamaGenerator()
@@ -79,8 +81,9 @@ class TestOllamaGenerator:
                 "template": None,
                 "system_prompt": None,
                 "model": "orca-mini",
-                "url": "http://localhost:11434/api/generate",
+                "url": "http://localhost:11434",
                 "streaming_callback": None,
+                "keep_alive": None,
                 "generation_kwargs": {},
             },
         }
@@ -90,6 +93,7 @@ class TestOllamaGenerator:
             model="llama2",
             streaming_callback=print_streaming_chunk,
             url="going_to_51_pegasi_b_for_weekend",
+            keep_alive="10m",
             generation_kwargs={"max_tokens": 10, "some_test_param": "test-params"},
         )
         data = component.to_dict()
@@ -101,6 +105,7 @@ class TestOllamaGenerator:
                 "template": None,
                 "system_prompt": None,
                 "model": "llama2",
+                "keep_alive": "10m",
                 "url": "going_to_51_pegasi_b_for_weekend",
                 "streaming_callback": "haystack.components.generators.utils.print_streaming_chunk",
                 "generation_kwargs": {"max_tokens": 10, "some_test_param": "test-params"},
@@ -116,6 +121,7 @@ class TestOllamaGenerator:
                 "template": None,
                 "system_prompt": None,
                 "model": "llama2",
+                "keep_alive": "5m",
                 "url": "going_to_51_pegasi_b_for_weekend",
                 "streaming_callback": "haystack.components.generators.utils.print_streaming_chunk",
                 "generation_kwargs": {"max_tokens": 10, "some_test_param": "test-params"},
@@ -126,44 +132,7 @@ class TestOllamaGenerator:
         assert component.streaming_callback is print_streaming_chunk
         assert component.url == "going_to_51_pegasi_b_for_weekend"
         assert component.generation_kwargs == {"max_tokens": 10, "some_test_param": "test-params"}
-
-    @pytest.mark.parametrize(
-        "configuration",
-        [
-            {
-                "model": "some_model",
-                "url": "https://localhost:11434/api/generate",
-                "raw": True,
-                "system_prompt": "You are mario from Super Mario Bros.",
-                "template": None,
-            },
-            {
-                "model": "some_model2",
-                "url": "https://localhost:11434/api/generate",
-                "raw": False,
-                "system_prompt": None,
-                "template": "some template",
-            },
-        ],
-    )
-    @pytest.mark.parametrize("stream", [True, False])
-    def test_create_json_payload(self, configuration: dict[str, Any], stream: bool):
-        prompt = "hello"
-        component = OllamaGenerator(**configuration)
-
-        observed = component._create_json_payload(prompt=prompt, stream=stream)
-
-        expected = {
-            "prompt": prompt,
-            "model": configuration["model"],
-            "stream": stream,
-            "system": configuration["system_prompt"],
-            "raw": configuration["raw"],
-            "template": configuration["template"],
-            "options": {},
-        }
-
-        assert observed == expected
+        assert component.keep_alive == "5m"
 
     @pytest.mark.integration
     def test_ollama_generator_run_streaming(self):
@@ -178,7 +147,7 @@ class TestOllamaGenerator:
                 return chunk
 
         callback = Callback()
-        component = OllamaGenerator(streaming_callback=callback)
+        component = OllamaGenerator(model="llama3.2:3b", streaming_callback=callback)
         results = component.run(prompt="What's the capital of Netherlands?")
 
         assert len(results["replies"]) == 1

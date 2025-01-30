@@ -1,5 +1,32 @@
 # Changelog
 
+## [integrations/qdrant-v7.0.0] - 2024-10-29
+
+### ⚙️ Miscellaneous Tasks
+
+- Update ruff linting scripts and settings (#1105)
+- Adopt uv as installer (#1142)
+
+## [integrations/qdrant-v6.0.0] - 2024-09-13
+
+## [integrations/qdrant-v5.1.0] - 2024-09-12
+
+### 🚀 Features
+
+- Qdrant - Add group_by and group_size optional parameters to Retrievers (#1054)
+
+## [integrations/qdrant-v5.0.0] - 2024-09-02
+
+## [integrations/qdrant-v4.2.0] - 2024-08-27
+
+### 🚜 Refactor
+
+- Qdrant Query API (#1025)
+
+### 🧪 Testing
+
+- Do not retry tests in `hatch run test` command (#954)
+
 ## [integrations/qdrant-v4.1.2] - 2024-07-15
 
 ### 🐛 Bug Fixes
@@ -85,8 +112,6 @@
 
 - Fix haystack-ai pin (#649)
 
-
-
 ## [integrations/qdrant-v3.2.0] - 2024-03-27
 
 ### 🚀 Features
@@ -97,14 +122,10 @@
 ### 🐛 Bug Fixes
 
 - Fix linter errors (#282)
-
-
 - Fix order of API docs (#447)
 
 This PR will also push the docs to Readme
 - Fixes (#518)
-
-
 
 ### 🚜 Refactor
 
@@ -135,8 +156,6 @@ This PR will also push the docs to Readme
 ### 🐛 Bug Fixes
 
 - Fix import paths for beta5 (#237)
-
-
 
 ### 🚜 Refactor
 

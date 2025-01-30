@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 import pytest
 from haystack.document_stores.types import FilterPolicy
+
 from haystack_integrations.components.retrievers.chroma import ChromaQueryTextRetriever
 from haystack_integrations.document_stores.chroma import ChromaDocumentStore
 
@@ -37,6 +38,8 @@ def test_retriever_to_json(request):
                     "collection_name": "test_retriever_to_json",
                     "embedding_function": "HuggingFaceEmbeddingFunction",
                     "persist_path": None,
+                    "host": None,
+                    "port": None,
                     "api_key": "1234567890",
                     "distance_function": "l2",
                 },

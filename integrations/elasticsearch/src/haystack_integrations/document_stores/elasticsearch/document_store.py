@@ -12,7 +12,6 @@ from haystack import default_from_dict, default_to_dict
 from haystack.dataclasses import Document
 from haystack.document_stores.errors import DocumentStoreError, DuplicateDocumentError
 from haystack.document_stores.types import DuplicatePolicy
-from haystack.utils.filters import convert
 from haystack.version import __version__ as haystack_version
 
 from elasticsearch import Elasticsearch, helpers  # type: ignore[import-not-found]
@@ -106,9 +105,12 @@ class ElasticsearchDocumentStore:
     @property
     def client(self) -> Elasticsearch:
         if self._client is None:
+            headers = self._kwargs.pop("headers", {})
+            headers["user-agent"] = f"haystack-py-ds/{haystack_version}"
+
             client = Elasticsearch(
                 self._hosts,
-                headers={"user-agent": f"haystack-py-ds/{haystack_version}"},
+                headers=headers,
                 **self._kwargs,
             )
             # Check client connection, this will raise if not connected
@@ -224,7 +226,8 @@ class ElasticsearchDocumentStore:
         :returns: List of `Document`s that match the filters.
         """
         if filters and "operator" not in filters and "conditions" not in filters:
-            filters = convert(filters)
+            msg = "Invalid filter syntax. See https://docs.haystack.deepset.ai/docs/metadata-filtering for details."
+            raise ValueError(msg)
 
         query = {"bool": {"filter": _normalize_filters(filters)}} if filters else None
         documents = self._search_documents(query=query)

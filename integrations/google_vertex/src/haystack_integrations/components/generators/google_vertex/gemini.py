@@ -1,20 +1,20 @@
 import logging
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, Iterable, List, Optional, Union
 
-import vertexai
 from haystack.core.component import component
 from haystack.core.component.types import Variadic
 from haystack.core.serialization import default_from_dict, default_to_dict
-from haystack.dataclasses.byte_stream import ByteStream
-from vertexai.preview.generative_models import (
+from haystack.dataclasses import ByteStream, StreamingChunk
+from haystack.utils import deserialize_callable, serialize_callable
+from vertexai import init as vertexai_init
+from vertexai.generative_models import (
     Content,
-    FunctionDeclaration,
     GenerationConfig,
+    GenerationResponse,
     GenerativeModel,
     HarmBlockThreshold,
     HarmCategory,
     Part,
-    Tool,
 )
 
 logger = logging.getLogger(__name__)
@@ -25,15 +25,12 @@ class VertexAIGeminiGenerator:
     """
     `VertexAIGeminiGenerator` enables text generation using Google Gemini models.
 
-    `VertexAIGeminiGenerator` supports both `gemini-pro` and `gemini-pro-vision` models.
-    Prompting with images requires `gemini-pro-vision`. Function calling, instead, requires `gemini-pro`.
-
     Usage example:
     ```python
     from haystack_integrations.components.generators.google_vertex import VertexAIGeminiGenerator
 
 
-    gemini = VertexAIGeminiGenerator(project_id=project_id)
+    gemini = VertexAIGeminiGenerator()
     result = gemini.run(parts = ["What is the most interesting thing you know?"])
     for answer in result["replies"]:
         print(answer)
@@ -51,15 +48,26 @@ class VertexAIGeminiGenerator:
     ```
     """
 
+    def __new__(cls, *_, **kwargs):
+        if "tools" in kwargs or "tool_config" in kwargs:
+            msg = (
+                "VertexAIGeminiGenerator does not support `tools` and `tool_config` parameters. "
+                "Use VertexAIGeminiChatGenerator instead."
+            )
+            raise TypeError(msg)
+        return super(VertexAIGeminiGenerator, cls).__new__(cls)  # noqa: UP008
+        # super(__class__, cls) is needed because of the component decorator
+
     def __init__(
         self,
         *,
-        model: str = "gemini-pro-vision",
-        project_id: str,
+        model: str = "gemini-1.5-flash",
+        project_id: Optional[str] = None,
         location: Optional[str] = None,
         generation_config: Optional[Union[GenerationConfig, Dict[str, Any]]] = None,
         safety_settings: Optional[Dict[HarmCategory, HarmBlockThreshold]] = None,
-        tools: Optional[List[Tool]] = None,
+        system_instruction: Optional[Union[str, ByteStream, Part]] = None,
+        streaming_callback: Optional[Callable[[StreamingChunk], None]] = None,
     ):
         """
         Multi-modal generator using Gemini model via Google Vertex AI.
@@ -67,11 +75,11 @@ class VertexAIGeminiGenerator:
         Authenticates using Google Cloud Application Default Credentials (ADCs).
         For more information see the official [Google documentation](https://cloud.google.com/docs/authentication/provide-credentials-adc).
 
-        :param project_id: ID of the GCP project to use.
-        :param model: Name of the model to use.
+        :param project_id: ID of the GCP project to use. By default, it is set during Google Cloud authentication.
+        :param model: Name of the model to use. For available models, see https://cloud.google.com/vertex-ai/generative-ai/docs/learn/models.
         :param location: The default location to use when making API calls, if not set uses us-central-1.
         :param generation_config: The generation config to use.
-            Can either be a [`GenerationConfig`](https://cloud.google.com/python/docs/reference/aiplatform/latest/vertexai.preview.generative_models.GenerationConfig)
+            Can either be a [`GenerationConfig`](https://cloud.google.com/python/docs/reference/aiplatform/latest/vertexai.generative_models.GenerationConfig)
             object or a dictionary of parameters.
             Accepted fields are:
                 - temperature
@@ -81,37 +89,34 @@ class VertexAIGeminiGenerator:
                 - max_output_tokens
                 - stop_sequences
         :param safety_settings: The safety settings to use. See the documentation
-            for [HarmBlockThreshold](https://cloud.google.com/python/docs/reference/aiplatform/latest/vertexai.preview.generative_models.HarmBlockThreshold)
-            and [HarmCategory](https://cloud.google.com/python/docs/reference/aiplatform/latest/vertexai.preview.generative_models.HarmCategory)
+            for [HarmBlockThreshold](https://cloud.google.com/python/docs/reference/aiplatform/latest/vertexai.generative_models.HarmBlockThreshold)
+            and [HarmCategory](https://cloud.google.com/python/docs/reference/aiplatform/latest/vertexai.generative_models.HarmCategory)
             for more details.
-        :param tools: List of tools to use when generating content. See the documentation for
-            [Tool](https://cloud.google.com/python/docs/reference/aiplatform/latest/vertexai.preview.generative_models.Tool)
-            the list of supported arguments.
+        :param system_instruction: Default system instruction to use for generating content.
+        :param streaming_callback: A callback function that is called when a new token is received from the stream.
+            The callback function accepts StreamingChunk as an argument.
         """
 
         # Login to GCP. This will fail if user has not set up their gcloud SDK
-        vertexai.init(project=project_id, location=location)
+        vertexai_init(project=project_id, location=location)
 
         self._model_name = model
         self._project_id = project_id
         self._location = location
-        self._model = GenerativeModel(self._model_name)
 
+        # model parameters
         self._generation_config = generation_config
         self._safety_settings = safety_settings
-        self._tools = tools
+        self._system_instruction = system_instruction
+        self._streaming_callback = streaming_callback
 
-    def _function_to_dict(self, function: FunctionDeclaration) -> Dict[str, Any]:
-        return {
-            "name": function._raw_function_declaration.name,
-            "parameters": function._raw_function_declaration.parameters,
-            "description": function._raw_function_declaration.description,
-        }
-
-    def _tool_to_dict(self, tool: Tool) -> Dict[str, Any]:
-        return {
-            "function_declarations": [self._function_to_dict(f) for f in tool._raw_tool.function_declarations],
-        }
+        # except streaming_callback, all other model parameters can be passed during initialization
+        self._model = GenerativeModel(
+            self._model_name,
+            generation_config=self._generation_config,
+            safety_settings=self._safety_settings,
+            system_instruction=self._system_instruction,
+        )
 
     def _generation_config_to_dict(self, config: Union[GenerationConfig, Dict[str, Any]]) -> Dict[str, Any]:
         if isinstance(config, dict):
@@ -132,6 +137,8 @@ class VertexAIGeminiGenerator:
         :returns:
             Dictionary with serialized data.
         """
+
+        callback_name = serialize_callable(self._streaming_callback) if self._streaming_callback else None
         data = default_to_dict(
             self,
             model=self._model_name,
@@ -139,10 +146,10 @@ class VertexAIGeminiGenerator:
             location=self._location,
             generation_config=self._generation_config,
             safety_settings=self._safety_settings,
-            tools=self._tools,
+            system_instruction=self._system_instruction,
+            streaming_callback=callback_name,
         )
-        if (tools := data["init_parameters"].get("tools")) is not None:
-            data["init_parameters"]["tools"] = [self._tool_to_dict(t) for t in tools]
+
         if (generation_config := data["init_parameters"].get("generation_config")) is not None:
             data["init_parameters"]["generation_config"] = self._generation_config_to_dict(generation_config)
         return data
@@ -157,11 +164,11 @@ class VertexAIGeminiGenerator:
         :returns:
            Deserialized component.
         """
-        if (tools := data["init_parameters"].get("tools")) is not None:
-            data["init_parameters"]["tools"] = [Tool.from_dict(t) for t in tools]
+
         if (generation_config := data["init_parameters"].get("generation_config")) is not None:
             data["init_parameters"]["generation_config"] = GenerationConfig.from_dict(generation_config)
-
+        if (serialized_callback_handler := data["init_parameters"].get("streaming_callback")) is not None:
+            data["init_parameters"]["streaming_callback"] = deserialize_callable(serialized_callback_handler)
         return default_from_dict(cls, data)
 
     def _convert_part(self, part: Union[str, ByteStream, Part]) -> Part:
@@ -175,35 +182,66 @@ class VertexAIGeminiGenerator:
             msg = f"Unsupported type {type(part)} for part {part}"
             raise ValueError(msg)
 
-    @component.output_types(replies=List[Union[str, Dict[str, str]]])
-    def run(self, parts: Variadic[Union[str, ByteStream, Part]]):
+    @component.output_types(replies=List[str])
+    def run(
+        self,
+        parts: Variadic[Union[str, ByteStream, Part]],
+        streaming_callback: Optional[Callable[[StreamingChunk], None]] = None,
+    ):
         """
         Generates content using the Gemini model.
 
         :param parts: Prompt for the model.
+        :param streaming_callback: A callback function that is called when a new token is received from the stream.
         :returns: A dictionary with the following keys:
             - `replies`: A list of generated content.
         """
+        # check if streaming_callback is passed
+        streaming_callback = streaming_callback or self._streaming_callback
         converted_parts = [self._convert_part(p) for p in parts]
 
         contents = [Content(parts=converted_parts, role="user")]
+
         res = self._model.generate_content(
             contents=contents,
-            generation_config=self._generation_config,
-            safety_settings=self._safety_settings,
-            tools=self._tools,
+            stream=streaming_callback is not None,
         )
         self._model.start_chat()
+        replies = self._get_stream_response(res, streaming_callback) if streaming_callback else self._get_response(res)
+
+        return {"replies": replies}
+
+    def _get_response(self, response_body: GenerationResponse) -> List[str]:
+        """
+        Extracts the responses from the Vertex AI response.
+
+        :param response_body: The response body from the Vertex AI request.
+
+        :returns: A list of string responses.
+        """
         replies = []
-        for candidate in res.candidates:
+        for candidate in response_body.candidates:
             for part in candidate.content.parts:
                 if part._raw_part.text != "":
                     replies.append(part.text)
-                elif part.function_call is not None:
-                    function_call = {
-                        "name": part.function_call.name,
-                        "args": dict(part.function_call.args.items()),
-                    }
-                    replies.append(function_call)
+        return replies
 
-        return {"replies": replies}
+    def _get_stream_response(
+        self, stream: Iterable[GenerationResponse], streaming_callback: Callable[[StreamingChunk], None]
+    ) -> List[str]:
+        """
+        Extracts the responses from the Vertex AI streaming response.
+
+        :param stream: The streaming response from the Vertex AI request.
+        :param streaming_callback: The handler for the streaming response.
+        :returns: A list of string responses.
+        """
+        streaming_chunks: List[StreamingChunk] = []
+
+        for chunk in stream:
+            streaming_chunk = StreamingChunk(content=chunk.text, meta=chunk.to_dict())
+            streaming_chunks.append(streaming_chunk)
+            streaming_callback(streaming_chunk)
+
+        responses = ["".join(streaming_chunk.content for streaming_chunk in streaming_chunks).lstrip()]
+        return responses

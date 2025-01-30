@@ -1,8 +1,9 @@
 from typing import Any, Dict, List, Optional
 
-import requests
 from haystack import Document, component
 from tqdm import tqdm
+
+from ollama import Client
 
 
 @component
@@ -27,7 +28,7 @@ class OllamaDocumentEmbedder:
     def __init__(
         self,
         model: str = "nomic-embed-text",
-        url: str = "http://localhost:11434/api/embeddings",
+        url: str = "http://localhost:11434",
         generation_kwargs: Optional[Dict[str, Any]] = None,
         timeout: int = 120,
         prefix: str = "",
@@ -35,35 +36,44 @@ class OllamaDocumentEmbedder:
         progress_bar: bool = True,
         meta_fields_to_embed: Optional[List[str]] = None,
         embedding_separator: str = "\n",
+        batch_size: int = 32,
     ):
         """
         :param model:
             The name of the model to use. The model should be available in the running Ollama instance.
         :param url:
-            The URL of the chat endpoint of a running Ollama instance.
+            The URL of a running Ollama instance.
         :param generation_kwargs:
             Optional arguments to pass to the Ollama generation endpoint, such as temperature, top_p, and others.
             See the available arguments in
             [Ollama docs](https://github.com/jmorganca/ollama/blob/main/docs/modelfile.md#valid-parameters-and-values).
         :param timeout:
             The number of seconds before throwing a timeout error from the Ollama API.
+        :param prefix:
+            A string to add at the beginning of each text.
+        :param suffix:
+            A string to add at the end of each text.
+        :param progress_bar:
+            If `True`, shows a progress bar when running.
+        :param meta_fields_to_embed:
+            List of metadata fields to embed along with the document text.
+        :param embedding_separator:
+            Separator used to concatenate the metadata fields to the document text.
+        :param batch_size:
+            Number of documents to process at once.
         """
         self.timeout = timeout
         self.generation_kwargs = generation_kwargs or {}
         self.url = url
         self.model = model
-        self.batch_size = 1  # API only supports a single call at the moment
+        self.batch_size = batch_size
         self.progress_bar = progress_bar
         self.meta_fields_to_embed = meta_fields_to_embed
         self.embedding_separator = embedding_separator
         self.suffix = suffix
         self.prefix = prefix
 
-    def _create_json_payload(self, text: str, generation_kwargs: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-        """
-        Returns A dictionary of JSON arguments for a POST request to an Ollama service
-        """
-        return {"model": self.model, "prompt": text, "options": {**self.generation_kwargs, **(generation_kwargs or {})}}
+        self._client = Client(host=self.url, timeout=self.timeout)
 
     def _prepare_texts_to_embed(self, documents: List[Document]) -> List[str]:
         """
@@ -91,27 +101,19 @@ class OllamaDocumentEmbedder:
         self, texts_to_embed: List[str], batch_size: int, generation_kwargs: Optional[Dict[str, Any]] = None
     ):
         """
-        Ollama Embedding only allows single uploads, not batching. Currently the batch size is set to 1.
-        If this changes in the future, line 86 (the first line within the for loop), can contain:
-            batch = texts_to_embed[i + i + batch_size]
+        Internal method to embed a batch of texts.
         """
 
         all_embeddings = []
-        meta: Dict[str, Any] = {"model": ""}
 
         for i in tqdm(
             range(0, len(texts_to_embed), batch_size), disable=not self.progress_bar, desc="Calculating embeddings"
         ):
-            batch = texts_to_embed[i]  # Single batch only
-            payload = self._create_json_payload(batch, generation_kwargs)
-            response = requests.post(url=self.url, json=payload, timeout=self.timeout)
-            response.raise_for_status()
-            result = response.json()
-            all_embeddings.append(result["embedding"])
+            batch = texts_to_embed[i : i + batch_size]
+            result = self._client.embed(model=self.model, input=batch, options=generation_kwargs)
+            all_embeddings.extend(result["embeddings"])
 
-        meta["model"] = self.model
-
-        return all_embeddings, meta
+        return all_embeddings
 
     @component.output_types(documents=List[Document], meta=Dict[str, Any])
     def run(self, documents: List[Document], generation_kwargs: Optional[Dict[str, Any]] = None):
@@ -128,19 +130,21 @@ class OllamaDocumentEmbedder:
             - `documents`: Documents with embedding information attached
             - `meta`: The metadata collected during the embedding process
         """
-        if not isinstance(documents, list) or documents and not isinstance(documents[0], Document):
+        if not isinstance(documents, list) or (documents and not isinstance(documents[0], Document)):
             msg = (
                 "OllamaDocumentEmbedder expects a list of Documents as input."
                 "In case you want to embed a list of strings, please use the OllamaTextEmbedder."
             )
             raise TypeError(msg)
 
+        generation_kwargs = generation_kwargs or self.generation_kwargs
+
         texts_to_embed = self._prepare_texts_to_embed(documents=documents)
-        embeddings, meta = self._embed_batch(
+        embeddings = self._embed_batch(
             texts_to_embed=texts_to_embed, batch_size=self.batch_size, generation_kwargs=generation_kwargs
         )
 
         for doc, emb in zip(documents, embeddings):
             doc.embedding = emb
 
-        return {"documents": documents, "meta": meta}
+        return {"documents": documents, "meta": {"model": self.model}}

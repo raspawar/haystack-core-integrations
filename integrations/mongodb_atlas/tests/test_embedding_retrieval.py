@@ -6,6 +6,7 @@ from typing import List
 
 import pytest
 from haystack.document_stores.errors import DocumentStoreError
+
 from haystack_integrations.document_stores.mongodb_atlas import MongoDBAtlasDocumentStore
 
 
@@ -20,11 +21,12 @@ class TestEmbeddingRetrieval:
             database_name="haystack_integration_test",
             collection_name="test_embeddings_collection",
             vector_search_index="cosine_index",
+            full_text_search_index="full_text_index",
         )
         query_embedding = [0.1] * 768
         results = document_store._embedding_retrieval(query_embedding=query_embedding, top_k=2, filters={})
         assert len(results) == 2
-        assert results[0].content == "Document A"
+        assert results[0].content == "Document C"
         assert results[1].content == "Document B"
         assert results[0].score > results[1].score
 
@@ -33,6 +35,7 @@ class TestEmbeddingRetrieval:
             database_name="haystack_integration_test",
             collection_name="test_embeddings_collection",
             vector_search_index="dotProduct_index",
+            full_text_search_index="full_text_index",
         )
         query_embedding = [0.1] * 768
         results = document_store._embedding_retrieval(query_embedding=query_embedding, top_k=2, filters={})
@@ -46,6 +49,7 @@ class TestEmbeddingRetrieval:
             database_name="haystack_integration_test",
             collection_name="test_embeddings_collection",
             vector_search_index="euclidean_index",
+            full_text_search_index="full_text_index",
         )
         query_embedding = [0.1] * 768
         results = document_store._embedding_retrieval(query_embedding=query_embedding, top_k=2, filters={})
@@ -59,6 +63,7 @@ class TestEmbeddingRetrieval:
             database_name="haystack_integration_test",
             collection_name="test_embeddings_collection",
             vector_search_index="cosine_index",
+            full_text_search_index="full_text_index",
         )
         query_embedding: List[float] = []
         with pytest.raises(ValueError):
@@ -69,6 +74,7 @@ class TestEmbeddingRetrieval:
             database_name="haystack_integration_test",
             collection_name="test_embeddings_collection",
             vector_search_index="cosine_index",
+            full_text_search_index="full_text_index",
         )
         query_embedding = [0.1] * 4
         with pytest.raises(DocumentStoreError):
@@ -97,6 +103,7 @@ class TestEmbeddingRetrieval:
             database_name="haystack_integration_test",
             collection_name="test_embeddings_collection",
             vector_search_index="cosine_index",
+            full_text_search_index="full_text_index",
         )
         query_embedding = [0.1] * 768
         filters = {"field": "content", "operator": "!=", "value": "Document A"}

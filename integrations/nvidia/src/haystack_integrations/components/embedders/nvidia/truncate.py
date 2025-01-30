@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2024-present deepset GmbH <info@deepset.ai>
+#
+# SPDX-License-Identifier: Apache-2.0
+
 from enum import Enum
 
 
@@ -6,10 +10,12 @@ class EmbeddingTruncateMode(Enum):
     Specifies how inputs to the NVIDIA embedding components are truncated.
     If START, the input will be truncated from the start.
     If END, the input will be truncated from the end.
+    If NONE, an error will be returned (if the input is too long).
     """
 
     START = "START"
     END = "END"
+    NONE = "NONE"
 
     def __str__(self):
         return self.value

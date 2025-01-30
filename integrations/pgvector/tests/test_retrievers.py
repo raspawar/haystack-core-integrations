@@ -7,6 +7,7 @@ import pytest
 from haystack.dataclasses import Document
 from haystack.document_stores.types import FilterPolicy
 from haystack.utils.auth import EnvVarSecret
+
 from haystack_integrations.components.retrievers.pgvector import PgvectorEmbeddingRetriever, PgvectorKeywordRetriever
 from haystack_integrations.document_stores.pgvector import PgvectorDocumentStore
 
@@ -49,6 +50,8 @@ class TestEmbeddingRetriever:
                     "type": "haystack_integrations.document_stores.pgvector.document_store.PgvectorDocumentStore",
                     "init_parameters": {
                         "connection_string": {"env_vars": ["PG_CONN_STR"], "strict": True, "type": "env_var"},
+                        "create_extension": True,
+                        "schema_name": "public",
                         "table_name": "haystack",
                         "embedding_dimension": 768,
                         "vector_function": "cosine_similarity",
@@ -80,6 +83,7 @@ class TestEmbeddingRetriever:
                     "type": "haystack_integrations.document_stores.pgvector.document_store.PgvectorDocumentStore",
                     "init_parameters": {
                         "connection_string": {"env_vars": ["PG_CONN_STR"], "strict": True, "type": "env_var"},
+                        "create_extension": False,
                         "table_name": "haystack_test_to_dict",
                         "embedding_dimension": 768,
                         "vector_function": "cosine_similarity",
@@ -104,6 +108,7 @@ class TestEmbeddingRetriever:
 
         assert isinstance(document_store, PgvectorDocumentStore)
         assert isinstance(document_store.connection_string, EnvVarSecret)
+        assert not document_store.create_extension
         assert document_store.table_name == "haystack_test_to_dict"
         assert document_store.embedding_dimension == 768
         assert document_store.vector_function == "cosine_similarity"
@@ -174,6 +179,8 @@ class TestKeywordRetriever:
                     "type": "haystack_integrations.document_stores.pgvector.document_store.PgvectorDocumentStore",
                     "init_parameters": {
                         "connection_string": {"env_vars": ["PG_CONN_STR"], "strict": True, "type": "env_var"},
+                        "create_extension": True,
+                        "schema_name": "public",
                         "table_name": "haystack",
                         "embedding_dimension": 768,
                         "vector_function": "cosine_similarity",
@@ -204,6 +211,7 @@ class TestKeywordRetriever:
                     "type": "haystack_integrations.document_stores.pgvector.document_store.PgvectorDocumentStore",
                     "init_parameters": {
                         "connection_string": {"env_vars": ["PG_CONN_STR"], "strict": True, "type": "env_var"},
+                        "create_extension": False,
                         "table_name": "haystack_test_to_dict",
                         "embedding_dimension": 768,
                         "vector_function": "cosine_similarity",
@@ -227,6 +235,7 @@ class TestKeywordRetriever:
 
         assert isinstance(document_store, PgvectorDocumentStore)
         assert isinstance(document_store.connection_string, EnvVarSecret)
+        assert not document_store.create_extension
         assert document_store.table_name == "haystack_test_to_dict"
         assert document_store.embedding_dimension == 768
         assert document_store.vector_function == "cosine_similarity"
@@ -311,7 +320,7 @@ class TestKeywordRetriever:
         )
         res = retriever.run(query="test query", filters={"field2": "value2"})
 
-        mock_store._keyword_retrieval.assert_called_once_with(
+        mock_store.mock_calls[0].assert_called_once_with(
             query="test query", filters={"field": "value", "field2": "value2"}, top_k=10
         )
 

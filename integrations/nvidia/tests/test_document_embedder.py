@@ -1,8 +1,13 @@
+# SPDX-FileCopyrightText: 2024-present deepset GmbH <info@deepset.ai>
+#
+# SPDX-License-Identifier: Apache-2.0
+
 import os
 
 import pytest
 from haystack import Document
 from haystack.utils import Secret
+
 from haystack_integrations.components.embedders.nvidia import EmbeddingTruncateMode, NvidiaDocumentEmbedder
 
 from . import MockBackend
@@ -14,7 +19,7 @@ class TestNvidiaDocumentEmbedder:
         embedder = NvidiaDocumentEmbedder()
 
         assert embedder.api_key == Secret.from_env_var("NVIDIA_API_KEY")
-        assert embedder.model == "NV-Embed-QA"
+        assert embedder.model == "nvidia/nv-embedqa-e5-v5"
         assert embedder.api_url == "https://ai.api.nvidia.com/v1/retrieval/nvidia"
         assert embedder.prefix == ""
         assert embedder.suffix == ""
@@ -70,6 +75,7 @@ class TestNvidiaDocumentEmbedder:
                 "meta_fields_to_embed": [],
                 "embedding_separator": "\n",
                 "truncate": None,
+                "timeout": 60.0,
             },
         }
 
@@ -85,6 +91,7 @@ class TestNvidiaDocumentEmbedder:
             meta_fields_to_embed=["test_field"],
             embedding_separator=" | ",
             truncate=EmbeddingTruncateMode.END,
+            timeout=45.0,
         )
         data = component.to_dict()
         assert data == {
@@ -100,10 +107,11 @@ class TestNvidiaDocumentEmbedder:
                 "meta_fields_to_embed": ["test_field"],
                 "embedding_separator": " | ",
                 "truncate": "END",
+                "timeout": 45.0,
             },
         }
 
-    def from_dict(self, monkeypatch):
+    def test_from_dict(self, monkeypatch):
         monkeypatch.setenv("NVIDIA_API_KEY", "fake-api-key")
         data = {
             "type": "haystack_integrations.components.embedders.nvidia.document_embedder.NvidiaDocumentEmbedder",
@@ -118,18 +126,38 @@ class TestNvidiaDocumentEmbedder:
                 "meta_fields_to_embed": ["test_field"],
                 "embedding_separator": " | ",
                 "truncate": "START",
+                "timeout": 45.0,
             },
         }
         component = NvidiaDocumentEmbedder.from_dict(data)
-        assert component.model == "nvolveqa_40k"
+        assert component.model == "playground_nvolveqa_40k"
         assert component.api_url == "https://example.com/v1"
         assert component.prefix == "prefix"
         assert component.suffix == "suffix"
+        assert component.batch_size == 10
+        assert component.progress_bar is False
+        assert component.meta_fields_to_embed == ["test_field"]
+        assert component.embedding_separator == " | "
+        assert component.truncate == EmbeddingTruncateMode.START
+        assert component.timeout == 45.0
+
+    def test_from_dict_defaults(self, monkeypatch):
+        monkeypatch.setenv("NVIDIA_API_KEY", "fake-api-key")
+        data = {
+            "type": "haystack_integrations.components.embedders.nvidia.document_embedder.NvidiaDocumentEmbedder",
+            "init_parameters": {},
+        }
+        component = NvidiaDocumentEmbedder.from_dict(data)
+        assert component.model == "nvidia/nv-embedqa-e5-v5"
+        assert component.api_url == "https://ai.api.nvidia.com/v1/retrieval/nvidia"
+        assert component.prefix == ""
+        assert component.suffix == ""
         assert component.batch_size == 32
         assert component.progress_bar
         assert component.meta_fields_to_embed == []
         assert component.embedding_separator == "\n"
-        assert component.truncate == EmbeddingTruncateMode.START
+        assert component.truncate is None
+        assert component.timeout == 60.0
 
     def test_prepare_texts_to_embed_w_metadata(self):
         documents = [
@@ -325,6 +353,19 @@ class TestNvidiaDocumentEmbedder:
         with pytest.raises(TypeError, match="NvidiaDocumentEmbedder expects a list of Documents as input"):
             embedder.run(documents=list_integers_input)
 
+    def test_run_empty_document(self, caplog):
+        model = "playground_nvolveqa_40k"
+        api_key = Secret.from_token("fake-api-key")
+        embedder = NvidiaDocumentEmbedder(model, api_key=api_key)
+
+        embedder.warm_up()
+        embedder.backend = MockBackend(model=model, api_key=api_key)
+
+        # Write check using caplog that a logger.warning is raised
+        with caplog.at_level("WARNING"):
+            embedder.run(documents=[Document(content="")])
+            assert "has no content to embed." in caplog.text
+
     def test_run_on_empty_list(self):
         model = "playground_nvolveqa_40k"
         api_key = Secret.from_token("fake-api-key")
@@ -338,6 +379,19 @@ class TestNvidiaDocumentEmbedder:
 
         assert result["documents"] is not None
         assert not result["documents"]  # empty list
+
+    def test_setting_timeout(self, monkeypatch):
+        monkeypatch.setenv("NVIDIA_API_KEY", "fake-api-key")
+        embedder = NvidiaDocumentEmbedder(timeout=10.0)
+        embedder.warm_up()
+        assert embedder.backend.timeout == 10.0
+
+    def test_setting_timeout_env(self, monkeypatch):
+        monkeypatch.setenv("NVIDIA_API_KEY", "fake-api-key")
+        monkeypatch.setenv("NVIDIA_TIMEOUT", "45")
+        embedder = NvidiaDocumentEmbedder()
+        embedder.warm_up()
+        assert embedder.backend.timeout == 45.0
 
     @pytest.mark.skipif(
         not os.environ.get("NVIDIA_API_KEY", None),
@@ -372,15 +426,34 @@ class TestNvidiaDocumentEmbedder:
             assert isinstance(doc.embedding, list)
             assert isinstance(doc.embedding[0], float)
 
+    @pytest.mark.parametrize(
+        "model, api_url",
+        [
+            ("NV-Embed-QA", None),
+            ("snowflake/arctic-embed-l", "https://integrate.api.nvidia.com/v1"),
+            ("nvidia/nv-embed-v1", "https://integrate.api.nvidia.com/v1"),
+            ("nvidia/nv-embedqa-mistral-7b-v2", "https://integrate.api.nvidia.com/v1"),
+            ("nvidia/nv-embedqa-e5-v5", "https://integrate.api.nvidia.com/v1"),
+            ("baai/bge-m3", "https://integrate.api.nvidia.com/v1"),
+        ],
+        ids=[
+            "NV-Embed-QA",
+            "snowflake/arctic-embed-l",
+            "nvidia/nv-embed-v1",
+            "nvidia/nv-embedqa-mistral-7b-v2",
+            "nvidia/nv-embedqa-e5-v5",
+            "baai/bge-m3",
+        ],
+    )
     @pytest.mark.skipif(
         not os.environ.get("NVIDIA_API_KEY", None),
         reason="Export an env var called NVIDIA_API_KEY containing the NVIDIA API key to run this test.",
     )
     @pytest.mark.integration
-    def test_run_integration_with_api_catalog(self):
+    def test_run_integration_with_api_catalog(self, model, api_url):
         embedder = NvidiaDocumentEmbedder(
-            model="NV-Embed-QA",
-            api_url="https://ai.api.nvidia.com/v1/retrieval/nvidia",
+            model=model,
+            **({"api_url": api_url} if api_url else {}),
             api_key=Secret.from_env_var("NVIDIA_API_KEY"),
         )
         embedder.warm_up()
